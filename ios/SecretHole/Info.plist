@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+
+	<!-- 基本信息 -->
+	<key>CFBundleDisplayName</key>
+	<string>树洞</string>
+	<key>CFBundleName</key>
+	<string>Shudong</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.yourcompany.shudong</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+
+	<!-- SwiftUI App 生命周期无需主 storyboard -->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+
+	<!-- Launch Screen（使用 Info.plist 样式的空启动屏即可） -->
+	<key>UILaunchScreen</key>
+	<dict/>
+
+	<!-- 支持方向（iPhone 竖屏） -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+
+	<!-- 外观：自动（跟随系统）-->
+	<key>UIUserInterfaceStyle</key>
+	<string>Automatic</string>
+
+	<!-- App Transport Security：仅放开本地开发的 HTTP 域名 -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>localhost</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+			</dict>
+			<key>127.0.0.1</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
+
+	<!-- 如未来需要相机/麦克风等权限，再添加对应 Usage Description -->
+	<!--
+	<key>NSCameraUsageDescription</key>
+	<string>用于发送照片内容</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>用于录制语音消息</string>
+	-->
+
+</dict>
+</plist>
