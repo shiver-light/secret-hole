@@ -22,11 +22,13 @@ curl -s http://localhost:8080/v1/auth/anon -d '{"device_hash":"dev-abc"}' -H 'co
 # 发一条
 curl -s http://localhost:8080/v1/messages \
 -H 'X-User-ID: 1' -H 'content-type: application/json' \
--d '{"body":"你好，世界","read_duration":30}'
+-d '{"body":"桃花仙人种桃树","read_duration":30}'
 
 
 # 领取
-curl -s http://localhost:8080/v1/messages/claim -H 'X-User-ID: 2'
+curl -s -X POST http://localhost:8080/v1/messages/claim \
+  -H 'X-User-ID: 2'
+
 
 ### 定期清理任务
 每分钟执行一次（示例 crontab）：
