@@ -6,7 +6,7 @@
 
 1. 启动数据库
 ```bash
-docker compose up -d db
+docker-compose up -d db
 ```
 2. 启动 API
 ```bash
