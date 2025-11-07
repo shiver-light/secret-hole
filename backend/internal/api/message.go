@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"secrethole/backend/internal/db"
@@ -113,17 +114,16 @@ func ClaimMessage(d *db.DB) gin.HandlerFunc {
 		}
 		defer tx.Rollback(ctx)
 
-		row := tx.QueryRow(ctx, `
-WITH pick AS (
-SELECT id FROM messages WHERE status = 0 AND (author_id IS NULL OR author_id <> $1)
-ORDER BY random() LIMIT 1 FOR UPDATE SKIP LOCKED
-)
-UPDATE messages m
-SET status=1, read_at=now(), expires_at = now() + (m.read_duration || ' seconds')::interval
-FROM pick
-WHERE m.id = pick.id
-RETURNING m.id, m.body_cipher, m.read_duration, m.read_at, m.expires_at;
-`, uid)
+		row := tx.QueryRow(ctx, ` WITH pick AS (
+								SELECT id FROM messages WHERE status = 0 AND (author_id IS NULL OR author_id <> $1)
+								ORDER BY random() LIMIT 1 FOR UPDATE SKIP LOCKED
+								)
+								UPDATE messages m
+								SET status=1, read_at=now(), expires_at = now() + (m.read_duration || ' seconds')::interval
+								FROM pick
+								WHERE m.id = pick.id
+								RETURNING m.id, m.body_cipher, m.read_duration, m.read_at, m.expires_at;
+								`, uid)
 
 		var resp claimResp
 		if err := row.Scan(&resp.ID, &resp.Body, &resp.ReadDuration, &resp.ReadAt, &resp.ExpiresAt); err != nil {
@@ -145,4 +145,61 @@ RETURNING m.id, m.body_cipher, m.read_duration, m.read_at, m.expires_at;
 
 func AckDelete() gin.HandlerFunc {
 	return func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) }
+}
+
+// ==== 一次回复 → 若双方同时在线则开临时好友窗 ====
+type replyReq struct {
+	Body string `json:"body"`
+}
+
+// POST /v1/messages/:id/reply
+func ReplyMessage(d *db.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		uid, _ := strconv.ParseInt(c.GetHeader("X-User-ID"), 10, 64)
+		if uid == 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "X-User-ID required"})
+			return
+		}
+		msgID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+		var req replyReq
+		if err := c.BindJSON(&req); err != nil || strings.TrimSpace(req.Body) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "empty reply"})
+			return
+		}
+		res, err := d.Pool.Exec(c, `
+			UPDATE messages SET reply_sender_id=$1, reply_body=$2
+			 WHERE id=$3 AND reply_body IS NULL
+		`, uid, req.Body, msgID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if res.RowsAffected() == 0 {
+			c.JSON(http.StatusConflict, gin.H{"error": "already replied"})
+			return
+		}
+
+		var author int64
+		if err := d.Pool.QueryRow(c, `SELECT author_id FROM messages WHERE id=$1`, msgID).Scan(&author); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if author == 0 || author == uid {
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+			return
+		}
+
+		aAct, _ := util.IsActiveForeground(c, d, uid)
+		bAct, _ := util.IsActiveForeground(c, d, author)
+		if aAct && bAct {
+			until, streak, err := openOrExtendTempFriendship(c, d, uid, author)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"ok": true, "active_until": until, "streak": streak})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "pending": true})
+	}
 }

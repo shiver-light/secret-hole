@@ -30,6 +30,9 @@ func (s *Server) Router() *gin.Engine {
 		v1.POST("/messages", api.PostMessage(s.DB))
 		v1.POST("/messages/claim", api.ClaimMessage(s.DB))
 		v1.POST("/messages/:id/ack-delete", api.AckDelete()) // 伪实现，可选
+		v1.POST("/presence/heartbeat", api.PresenceHeartbeat(s.DB))
+		v1.POST("/messages/:id/reply", api.ReplyMessage(s.DB))
+		v1.POST("/dm/send", api.SendDM(s.DB))
 	}
 	return r
 }
