@@ -57,7 +57,10 @@ func PostMessage(d *db.DB) gin.HandlerFunc {
 
 		// check & incr quota atomically
 		date := util.ShanghaiDate(time.Now())
-		cmd := `UPDATE daily_quota SET sent_count = sent_count + 1 WHERE user_id=$1 AND quota_date=$2 AND sent_count < 3`
+		cmd := `UPDATE daily_quota
+				SET sent_count = sent_count + 1
+				WHERE user_id=$1 AND quota_date=$2 AND sent_count < 3
+				`
 		ct, err := d.Pool.Exec(ctx, cmd, uid, date)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -90,7 +93,10 @@ func ClaimMessage(d *db.DB) gin.HandlerFunc {
 
 		date := util.ShanghaiDate(time.Now())
 		// 先扣领取配额（失败则返回429）
-		cmd := `UPDATE daily_quota SET recv_count = recv_count + 1 WHERE user_id=$1 AND quota_date=$2 AND recv_count < 3`
+		cmd := `UPDATE daily_quota
+				SET sent_count = sent_count + 1
+				WHERE user_id=$1 AND quota_date=$2 AND sent_count < 3
+				`
 		if ct, err := d.Pool.Exec(ctx, cmd, uid, date); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
