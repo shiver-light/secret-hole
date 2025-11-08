@@ -2,23 +2,29 @@ import SwiftUI
 
 @main
 struct SecretHoleApp: App {
-  @State private var userID: Int64 = 0
+  @StateObject private var appVM = AppViewModel()
+  @StateObject private var heartbeat = HeartbeatManager.shared
 
   var body: some Scene {
     WindowGroup {
-      NavigationStack {
-        HomeView(userID: $userID)
-      }
-      .task {
-        if userID == 0 {
-          do {
-            let resp = try await API.authAnon(
-              deviceHash: UIDevice.current.identifierForVendor?.uuidString ?? "dev")
-            userID = resp.user_id
-          } catch {
-            print("auth error", error)
-          }
+      RootView()
+        .environmentObject(appVM)
+        .onAppear {
+          heartbeat.bind(appVM: appVM)
+          heartbeat.start()
         }
+    }
+  }
+}
+
+struct RootView: View {
+  @EnvironmentObject var appVM: AppViewModel
+  var body: some View {
+    Group {
+      if appVM.userId != nil {
+        HomeView()
+      } else {
+        AuthView()
       }
     }
   }
