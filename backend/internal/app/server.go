@@ -23,7 +23,7 @@ func (s *Server) Router() *gin.Engine {
 	r.Use(gin.Recovery())
 	r.Use(CORSMiddleware(s.Cfg.CorsOrigins))
 
-	v1 := r.Group("/v1") {
+	v1 := r.Group("/v1")
     // 不需要登录
     v1.POST("/auth/register", api.RegisterHandler(s.DB))
     v1.POST("/auth/login",    api.LoginHandler(s.DB))
