@@ -34,7 +34,7 @@ type LoginResp struct {
 	Token  string `json:"token"`
 }
 
-func RegisterHandler(c *gin.Context) {
+func RegisterHandler(c *gin.Context) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		db := mustDB(c)
 		var req RegisterReq
@@ -81,7 +81,7 @@ func RegisterHandler(c *gin.Context) {
 	}
 }
 
-func LoginHandler(c *gin.Context) {
+func LoginHandler(c *gin.Context) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		db := mustDB(c)
 		var req LoginReq
