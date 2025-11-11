@@ -37,19 +37,16 @@ type LoginResp struct {
 
 func RegisterHandler(d *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		db := mustDB(c)
 		var req RegisterReq
 		if err := c.BindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "bad json"})
 			return
 		}
-
 		req.Name = strings.TrimSpace(req.Name)
 		if req.Name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
 			return
 		}
-		// 简单校验“最多7个汉字”：应用层按 rune 计数（这里不强卡字形，前端也会限制）
 		if runeLen(req.Name) > 7 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name too long (<=7 characters)"})
 			return
@@ -70,10 +67,10 @@ func RegisterHandler(d *db.DB) gin.HandlerFunc {
 		}
 
 		var userID int64
-		err = db.QueryRow(`
-		INSERT INTO users(name, avatar_base64, gender_color, password_hash)
-		VALUES ($1,$2,$3,$4) RETURNING id
-	`, req.Name, nullIfEmpty(req.AvatarBase64), nullIfEmpty(req.GenderColor), hash).Scan(&userID)
+		err = d.SQL.QueryRow(`
+            INSERT INTO users(name, avatar_base64, gender_color, password_hash)
+            VALUES ($1,$2,$3,$4) RETURNING id
+        `, req.Name, nullIfEmpty(req.AvatarBase64), nullIfEmpty(req.GenderColor), hash).Scan(&userID)
 		if err != nil {
 			c.JSON(http.StatusConflict, gin.H{"error": "name exists?"})
 			return
@@ -84,14 +81,14 @@ func RegisterHandler(d *db.DB) gin.HandlerFunc {
 
 func LoginHandler(d *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		db := mustDB(c)
 		var req LoginReq
 		if err := c.BindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "bad json"})
 			return
 		}
+
 		var hash string
-		err := db.QueryRow(`SELECT password_hash FROM users WHERE id=$1`, req.UserID).Scan(&hash)
+		err := d.SQL.QueryRow(`SELECT password_hash FROM users WHERE id=$1`, req.UserID).Scan(&hash)
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user_id or password"})
 			return
@@ -105,8 +102,10 @@ func LoginHandler(d *db.DB) gin.HandlerFunc {
 		}
 
 		token := randomToken(32)
-		_, err = db.Exec(`INSERT INTO auth_tokens(token, user_id, expires_at) VALUES ($1,$2,$3)`,
-			token, req.UserID, time.Now().Add(30*24*time.Hour))
+		_, err = d.SQL.Exec(
+			`INSERT INTO auth_tokens(token, user_id, expires_at) VALUES ($1,$2,$3)`,
+			token, req.UserID, time.Now().Add(30*24*time.Hour),
+		)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "token issue"})
 			return
@@ -139,13 +138,7 @@ func AuthMiddleware(db *sql.DB) gin.HandlerFunc {
 }
 
 // utils
-func mustDB(c *gin.Context) *sql.DB {
-	dbi, ok := c.MustGet("db").(*sql.DB)
-	if !ok {
-		panic("db not in context")
-	}
-	return dbi
-}
+
 func runeLen(s string) int { return len([]rune(s)) }
 func nullIfEmpty(s string) *string {
 	if strings.TrimSpace(s) == "" {
