@@ -45,7 +45,7 @@ func MeProfileGet(d *db.DB) gin.HandlerFunc {
 
 		err := d.Pool.QueryRow(
 			c.Request.Context(),
-			`SELECT name, avatar_base64, gender_color FROM users WHERE id=$1`,
+			`SELECT nickname, avatar_base64, gender_color FROM users WHERE id=$1`,
 			uid,
 		).Scan(&name, &avatar, &color)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -85,7 +85,7 @@ func MeProfilePut(d *db.DB) gin.HandlerFunc {
 		}
 		req.Name = strings.TrimSpace(req.Name)
 		if req.Name == "" || runeLen(req.Name) > 7 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid name (1~7 chars)"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid nickname (1~7 chars)"})
 			return
 		}
 		if req.GenderColor != nil && *req.GenderColor != "" && !isHexColor(*req.GenderColor) {
@@ -100,14 +100,14 @@ func MeProfilePut(d *db.DB) gin.HandlerFunc {
 		ct := c.Request.Context()
 		cmd, err := d.Pool.Exec(ct,
 			`UPDATE users
-			  SET name=$1, avatar_base64=$2, gender_color=$3
+			  SET nickname=$1, avatar_base64=$2, gender_color=$3
 			  WHERE id=$4`,
 			req.Name, nAvatar, nColor, uid,
 		)
 		if err != nil {
 			// 唯一冲突（昵称重复）
 			if isUniqueViolation(err) {
-				c.JSON(http.StatusConflict, gin.H{"error": "name exists"})
+				c.JSON(http.StatusConflict, gin.H{"error": "nickname exists"})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error", "detail": err.Error()})
