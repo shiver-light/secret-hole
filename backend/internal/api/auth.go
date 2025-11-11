@@ -2,17 +2,21 @@ package api
 
 import (
 	"crypto/rand"
-	"database/sql"
 	"encoding/base64"
 	"errors"
 	"net/http"
-	"secrethole/backend/internal/db"
 	"strings"
 	"time"
 
+	"secrethole/backend/internal/db"
+
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgconn"
+	"github.com/jackc/pgx/v5" // 用于 ErrNoRows
 	"golang.org/x/crypto/argon2"
 )
+
+// ====== 请求/响应模型 ======
 
 type RegisterReq struct {
 	Name         string `json:"name"`
@@ -20,7 +24,6 @@ type RegisterReq struct {
 	AvatarBase64 string `json:"avatar_base64,omitempty"`
 	GenderColor  string `json:"gender_color,omitempty"`
 }
-
 type RegisterResp struct {
 	UserID int64 `json:"user_id"`
 }
@@ -29,11 +32,12 @@ type LoginReq struct {
 	UserID   int64  `json:"user_id"`
 	Password string `json:"password"`
 }
-
 type LoginResp struct {
 	UserID int64  `json:"user_id"`
 	Token  string `json:"token"`
 }
+
+// ====== Handler（使用 d.Pool，别再从 Context 取 DB）======
 
 func RegisterHandler(d *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -47,7 +51,7 @@ func RegisterHandler(d *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
 			return
 		}
-		if runeLen(req.Name) > 7 {
+		if len([]rune(req.Name)) > 7 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name too long (<=7 characters)"})
 			return
 		}
@@ -66,13 +70,20 @@ func RegisterHandler(d *db.DB) gin.HandlerFunc {
 			return
 		}
 
+		ctx := c.Request.Context()
 		var userID int64
-		err = d.SQL.QueryRow(`
-            INSERT INTO users(name, avatar_base64, gender_color, password_hash)
-            VALUES ($1,$2,$3,$4) RETURNING id
-        `, req.Name, nullIfEmpty(req.AvatarBase64), nullIfEmpty(req.GenderColor), hash).Scan(&userID)
+		err = d.Pool.QueryRow(
+			ctx,
+			`INSERT INTO users(name, avatar_base64, gender_color, password_hash)
+			 VALUES ($1,$2,$3,$4) RETURNING id`,
+			req.Name, nullIfEmpty(req.AvatarBase64), nullIfEmpty(req.GenderColor), hash,
+		).Scan(&userID)
 		if err != nil {
-			c.JSON(http.StatusConflict, gin.H{"error": "name exists?"})
+			if isUniqueViolation(err) {
+				c.JSON(http.StatusConflict, gin.H{"error": "name exists"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
 			return
 		}
 		c.JSON(http.StatusOK, RegisterResp{UserID: userID})
@@ -87,9 +98,11 @@ func LoginHandler(d *db.DB) gin.HandlerFunc {
 			return
 		}
 
+		ctx := c.Request.Context()
+
 		var hash string
-		err := d.SQL.QueryRow(`SELECT password_hash FROM users WHERE id=$1`, req.UserID).Scan(&hash)
-		if errors.Is(err, sql.ErrNoRows) {
+		err := d.Pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id=$1`, req.UserID).Scan(&hash)
+		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user_id or password"})
 			return
 		} else if err != nil {
@@ -102,7 +115,8 @@ func LoginHandler(d *db.DB) gin.HandlerFunc {
 		}
 
 		token := randomToken(32)
-		_, err = d.SQL.Exec(
+		_, err = d.Pool.Exec(
+			ctx,
 			`INSERT INTO auth_tokens(token, user_id, expires_at) VALUES ($1,$2,$3)`,
 			token, req.UserID, time.Now().Add(30*24*time.Hour),
 		)
@@ -114,32 +128,33 @@ func LoginHandler(d *db.DB) gin.HandlerFunc {
 	}
 }
 
-// 中间件：优先用 X-Auth-Token 解 user_id；兼容 X-User-ID（老接口）
-func AuthMiddleware(db *sql.DB) gin.HandlerFunc {
+// 可选：基于 Token 的鉴权中间件（统一用 d.Pool）
+func AuthMiddleware(d *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		ctx := c.Request.Context()
 		if tok := c.GetHeader("X-Auth-Token"); tok != "" {
 			var uid int64
 			var exp *time.Time
-			err := db.QueryRow(`SELECT user_id, expires_at FROM auth_tokens WHERE token=$1`, tok).Scan(&uid, &exp)
-			if err == nil {
+			if err := d.Pool.QueryRow(
+				ctx, `SELECT user_id, expires_at FROM auth_tokens WHERE token=$1`, tok,
+			).Scan(&uid, &exp); err == nil {
 				if exp == nil || exp.After(time.Now()) {
 					c.Set("user_id", uid)
 				}
 			}
 		}
-		// 兼容旧逻辑
+		// 兼容老的 X-User-ID（如需）
 		if _, exists := c.Get("user_id"); !exists {
 			if v := c.GetHeader("X-User-ID"); v != "" {
-				// 你已有的解析逻辑：转为 int64；此处略
+				// 这里按你的老逻辑解析字符串为 int64，然后 c.Set("user_id", uid)
 			}
 		}
 		c.Next()
 	}
 }
 
-// utils
+// ====== 工具函数（保留你原来的实现也可）======
 
-func runeLen(s string) int { return len([]rune(s)) }
 func nullIfEmpty(s string) *string {
 	if strings.TrimSpace(s) == "" {
 		return nil
@@ -147,13 +162,21 @@ func nullIfEmpty(s string) *string {
 	return &s
 }
 
-// ========== 密码哈希（Argon2id 简易实现） ==========
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505" // unique_violation
+	}
+	return false
+}
+
+// ---- 密码哈希/校验（和你原来一致）----
+
 func hashPassword(password string) (string, error) {
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	// 参数：可以按你的安全/性能调整
 	hash := argon2.IDKey([]byte(password), salt, 1, 64*1024, 4, 32)
 	return "argon2id$1$65536$4$32$" +
 		base64.RawStdEncoding.EncodeToString(salt) + "$" +
@@ -161,7 +184,6 @@ func hashPassword(password string) (string, error) {
 }
 
 func verifyPassword(stored, password string) bool {
-	// 简化解析（生产建议用标准库封装/第三方库）
 	parts := strings.Split(stored, "$")
 	if len(parts) < 7 {
 		return false

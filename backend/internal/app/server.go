@@ -27,6 +27,7 @@ func (s *Server) Router() *gin.Engine {
 	{
 		v1.POST("/auth/register", api.RegisterHandler(s.DB))
 		v1.POST("/auth/login", api.LoginHandler(s.DB))
+		v1.Use(api.AuthMiddleware(s.DB))
 		v1.GET("/me/quota", api.MeQuota(s.DB))
 		v1.POST("/messages", api.PostMessage(s.DB))
 		v1.POST("/messages/claim", api.ClaimMessage(s.DB))
