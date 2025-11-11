@@ -35,79 +35,83 @@ type LoginResp struct {
 }
 
 func RegisterHandler(c *gin.Context) {
-	db := mustDB(c)
-	var req RegisterReq
-	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "bad json"})
-		return
-	}
+	return func(c *gin.Context) {
+		db := mustDB(c)
+		var req RegisterReq
+		if err := c.BindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "bad json"})
+			return
+		}
 
-	req.Name = strings.TrimSpace(req.Name)
-	if req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
-		return
-	}
-	// 简单校验“最多7个汉字”：应用层按 rune 计数（这里不强卡字形，前端也会限制）
-	if runeLen(req.Name) > 7 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "name too long (<=7 characters)"})
-		return
-	}
-	if len(req.Password) < 6 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "password too short (>=6)"})
-		return
-	}
-	if req.GenderColor != "" && !strings.HasPrefix(req.GenderColor, "#") {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "gender_color must be like #RRGGBB"})
-		return
-	}
+		req.Name = strings.TrimSpace(req.Name)
+		if req.Name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
+			return
+		}
+		// 简单校验“最多7个汉字”：应用层按 rune 计数（这里不强卡字形，前端也会限制）
+		if runeLen(req.Name) > 7 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name too long (<=7 characters)"})
+			return
+		}
+		if len(req.Password) < 6 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "password too short (>=6)"})
+			return
+		}
+		if req.GenderColor != "" && !strings.HasPrefix(req.GenderColor, "#") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "gender_color must be like #RRGGBB"})
+			return
+		}
 
-	hash, err := hashPassword(req.Password)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "hash error"})
-		return
-	}
+		hash, err := hashPassword(req.Password)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "hash error"})
+			return
+		}
 
-	var userID int64
-	err = db.QueryRow(`
+		var userID int64
+		err = db.QueryRow(`
 		INSERT INTO users(name, avatar_base64, gender_color, password_hash)
 		VALUES ($1,$2,$3,$4) RETURNING id
 	`, req.Name, nullIfEmpty(req.AvatarBase64), nullIfEmpty(req.GenderColor), hash).Scan(&userID)
-	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "name exists?"})
-		return
+		if err != nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "name exists?"})
+			return
+		}
+		c.JSON(http.StatusOK, RegisterResp{UserID: userID})
 	}
-	c.JSON(http.StatusOK, RegisterResp{UserID: userID})
 }
 
 func LoginHandler(c *gin.Context) {
-	db := mustDB(c)
-	var req LoginReq
-	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "bad json"})
-		return
-	}
-	var hash string
-	err := db.QueryRow(`SELECT password_hash FROM users WHERE id=$1`, req.UserID).Scan(&hash)
-	if errors.Is(err, sql.ErrNoRows) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user_id or password"})
-		return
-	} else if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
-		return
-	}
-	if !verifyPassword(hash, req.Password) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user_id or password"})
-		return
-	}
+	return func(c *gin.Context) {
+		db := mustDB(c)
+		var req LoginReq
+		if err := c.BindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "bad json"})
+			return
+		}
+		var hash string
+		err := db.QueryRow(`SELECT password_hash FROM users WHERE id=$1`, req.UserID).Scan(&hash)
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user_id or password"})
+			return
+		} else if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+			return
+		}
+		if !verifyPassword(hash, req.Password) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user_id or password"})
+			return
+		}
 
-	token := randomToken(32)
-	_, err = db.Exec(`INSERT INTO auth_tokens(token, user_id, expires_at) VALUES ($1,$2,$3)`,
-		token, req.UserID, time.Now().Add(30*24*time.Hour))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "token issue"})
-		return
+		token := randomToken(32)
+		_, err = db.Exec(`INSERT INTO auth_tokens(token, user_id, expires_at) VALUES ($1,$2,$3)`,
+			token, req.UserID, time.Now().Add(30*24*time.Hour))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "token issue"})
+			return
+		}
+		c.JSON(http.StatusOK, LoginResp{UserID: req.UserID, Token: token})
 	}
-	c.JSON(http.StatusOK, LoginResp{UserID: req.UserID, Token: token})
 }
 
 // 中间件：优先用 X-Auth-Token 解 user_id；兼容 X-User-ID（老接口）
