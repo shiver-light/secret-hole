@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
+	"secrethole/backend/internal/db"
 	"strings"
 	"time"
 
@@ -34,7 +35,7 @@ type LoginResp struct {
 	Token  string `json:"token"`
 }
 
-func RegisterHandler(c *gin.Context) gin.HandlerFunc {
+func RegisterHandler(d *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		db := mustDB(c)
 		var req RegisterReq
@@ -81,7 +82,7 @@ func RegisterHandler(c *gin.Context) gin.HandlerFunc {
 	}
 }
 
-func LoginHandler(c *gin.Context) gin.HandlerFunc {
+func LoginHandler(d *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		db := mustDB(c)
 		var req LoginReq
