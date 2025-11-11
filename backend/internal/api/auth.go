@@ -19,8 +19,8 @@ type anonReq struct {
 type anonResp struct {
 	UserID   int64  `json:"user_id"`
 	Date     string `json:"date"`
-	SentLeft int    `json:"sent_left"`
-	RecvLeft int    `json:"recv_left"`
+	SentLeft int    `json:"send_left"`
+	RecvLeft int    `json:"claim_left"`
 }
 
 func AuthAnon(d *db.DB) gin.HandlerFunc {

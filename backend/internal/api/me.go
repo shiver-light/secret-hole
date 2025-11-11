@@ -27,6 +27,6 @@ func MeQuota(d *db.DB) gin.HandlerFunc {
 		date := util.ShanghaiDate(time.Now())
 		_, _ = d.Pool.Exec(ctx, `INSERT INTO daily_quota(user_id, quota_date) VALUES ($1,$2) ON CONFLICT DO NOTHING`, id, date)
 		_ = d.Pool.QueryRow(ctx, `SELECT sent_count, recv_count FROM daily_quota WHERE user_id=$1 AND quota_date=$2`, id, date).Scan(&sent, &recv)
-		c.JSON(http.StatusOK, gin.H{"date": date, "sent_left": 3 - sent, "recv_left": 3 - recv})
+		c.JSON(http.StatusOK, gin.H{"date": date, "send_left": 3 - sent, "claim_left": 3 - recv})
 	}
 }
