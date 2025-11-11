@@ -2,8 +2,10 @@ package api
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -39,6 +41,14 @@ type LoginResp struct {
 
 // ====== Handler（使用 d.Pool，别再从 Context 取 DB）======
 
+func nullStr(s string) sql.NullString {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return sql.NullString{Valid: false}
+	}
+	return sql.NullString{String: s, Valid: true}
+}
+
 func RegisterHandler(d *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req RegisterReq
@@ -47,12 +57,8 @@ func RegisterHandler(d *db.DB) gin.HandlerFunc {
 			return
 		}
 		req.Name = strings.TrimSpace(req.Name)
-		if req.Name == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
-			return
-		}
-		if len([]rune(req.Name)) > 7 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "name too long (<=7 characters)"})
+		if req.Name == "" || len([]rune(req.Name)) > 7 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid name (<=7)"})
 			return
 		}
 		if len(req.Password) < 6 {
@@ -66,6 +72,7 @@ func RegisterHandler(d *db.DB) gin.HandlerFunc {
 
 		hash, err := hashPassword(req.Password)
 		if err != nil {
+			log.Printf("hash error: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "hash error"})
 			return
 		}
@@ -75,15 +82,16 @@ func RegisterHandler(d *db.DB) gin.HandlerFunc {
 		err = d.Pool.QueryRow(
 			ctx,
 			`INSERT INTO users(name, avatar_base64, gender_color, password_hash)
-			 VALUES ($1,$2,$3,$4) RETURNING id`,
-			req.Name, nullIfEmpty(req.AvatarBase64), nullIfEmpty(req.GenderColor), hash,
+             VALUES ($1,$2,$3,$4) RETURNING id`,
+			req.Name, nullStr(req.AvatarBase64), nullStr(req.GenderColor), hash,
 		).Scan(&userID)
 		if err != nil {
+			log.Printf("register insert error: %v", err)
 			if isUniqueViolation(err) {
 				c.JSON(http.StatusConflict, gin.H{"error": "name exists"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error", "detail": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, RegisterResp{UserID: userID})
@@ -99,14 +107,14 @@ func LoginHandler(d *db.DB) gin.HandlerFunc {
 		}
 
 		ctx := c.Request.Context()
-
 		var hash string
 		err := d.Pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id=$1`, req.UserID).Scan(&hash)
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user_id or password"})
 			return
 		} else if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+			log.Printf("login select error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error", "detail": err.Error()})
 			return
 		}
 		if !verifyPassword(hash, req.Password) {
@@ -121,14 +129,14 @@ func LoginHandler(d *db.DB) gin.HandlerFunc {
 			token, req.UserID, time.Now().Add(30*24*time.Hour),
 		)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "token issue"})
+			log.Printf("token insert error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error", "detail": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, LoginResp{UserID: req.UserID, Token: token})
 	}
 }
 
-// 可选：基于 Token 的鉴权中间件（统一用 d.Pool）
 func AuthMiddleware(d *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
@@ -141,12 +149,9 @@ func AuthMiddleware(d *db.DB) gin.HandlerFunc {
 				if exp == nil || exp.After(time.Now()) {
 					c.Set("user_id", uid)
 				}
-			}
-		}
-		// 兼容老的 X-User-ID（如需）
-		if _, exists := c.Get("user_id"); !exists {
-			if v := c.GetHeader("X-User-ID"); v != "" {
-				// 这里按你的老逻辑解析字符串为 int64，然后 c.Set("user_id", uid)
+			} else {
+				// 可选：开发期打印，帮助定位表/连接问题
+				log.Printf("auth token query error: %v", err)
 			}
 		}
 		c.Next()
