@@ -81,14 +81,14 @@ func RegisterHandler(d *db.DB) gin.HandlerFunc {
 		var userID int64
 		err = d.Pool.QueryRow(
 			ctx,
-			`INSERT INTO users(name, avatar_base64, gender_color, password_hash)
+			`INSERT INTO users(nickname, avatar_base64, gender_color, password_hash)
              VALUES ($1,$2,$3,$4) RETURNING id`,
 			req.Name, nullStr(req.AvatarBase64), nullStr(req.GenderColor), hash,
 		).Scan(&userID)
 		if err != nil {
 			log.Printf("register insert error: %v", err)
 			if isUniqueViolation(err) {
-				c.JSON(http.StatusConflict, gin.H{"error": "name exists"})
+				c.JSON(http.StatusConflict, gin.H{"error": "nickname exists"})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error", "detail": err.Error()})
