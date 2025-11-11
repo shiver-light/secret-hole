@@ -12,7 +12,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type OkResp struct {
@@ -185,11 +184,4 @@ func toNullString(p *string) sql.NullString {
 		return sql.NullString{Valid: false}
 	}
 	return sql.NullString{String: strings.TrimSpace(*p), Valid: true}
-}
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.Code == "23505"
-	}
-	return false
 }
